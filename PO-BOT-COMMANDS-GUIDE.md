@@ -502,50 +502,6 @@ docs/prd/
 
 ---
 
-## 學習路徑建議
-
-### 第 1 週：基礎功能
-```
-Day 1-2: 學習 /create-story
-- 嘗試建立 3-5 個不同類型的 Story
-- 理解產出的結構
-
-Day 3-4: 學習 /validate-story
-- 驗證之前建立的 Stories
-- 理解驗證報告的意義
-- 根據報告修正問題
-
-Day 5: 完整流程練習
-- create-story → validate-story → 修正 → 再驗證
-```
-
-### 第 2 週：進階功能
-```
-Day 1-2: 學習 /execute-checklist
-- 準備一個完整的專案計劃
-- 執行全面檢查
-- 理解 10 大類別的意義
-
-Day 3-4: 學習 /correct-course
-- 模擬需求變更情境
-- 練習使用 change-checklist
-- 產出 Sprint Change Proposal
-
-Day 5: Brownfield 專案練習
-- 學習 /create-epic
-- Epic → Stories 完整流程
-```
-
-### 第 3 週：綜合應用
-```
-實際專案應用:
-- 使用完整工作流程
-- 建立自己的最佳實踐
-- 根據專案類型選擇合適指令
-```
-
----
-
 ## 常見問題 (FAQ)
 
 ### Q1: `/validate-story` 和 `/execute-checklist` 都要用嗎？
