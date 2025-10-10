@@ -129,6 +129,16 @@ const commands = [
     ),
 
   new SlashCommandBuilder()
+    .setName('create-pr')
+    .setDescription('根據提供的 Story 內容建立 Pull Request')
+    .addStringOption(option =>
+      option
+        .setName('story')
+        .setDescription('Story 完整內容（Markdown）')
+        .setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
     .setName('validate-story')
     .setDescription('驗證 Story 的完整性')
     .addStringOption(option =>
@@ -353,6 +363,31 @@ IMPORTANT: Follow the task instructions completely. Create a full markdown story
 The story should be implementation-ready for the Dev agent. Format it as a complete markdown document, not just a brief summary.`;
           break;
 
+        case 'create-pr':
+          story = interaction.options.getString('story');
+          if (!story) {
+            await interaction.editReply('❌ 請提供完整的 Story 內容。');
+            return;
+          }
+
+          try {
+            const summary = extractStorySummary(story);
+            const filename = buildStoryFilename(summary);
+            const safeSummary = await triggerStoryWorkflow({
+              filename,
+              content: story,
+              summary
+            });
+
+            await interaction.editReply(
+              `🚀 已觸發 GitHub Action 建立 Pull Request。\n• 檔案：\`${filename}\`\n• PR 標題：Add story: ${safeSummary}\n請稍候於 GitHub Actions 查詢執行情況。`
+            );
+          } catch (workflowError) {
+            console.error('[PO Bot] Error triggering story workflow:', workflowError);
+            await interaction.editReply(`⚠️ 觸發 GitHub Action 失敗：${workflowError.message}`);
+          }
+          return;
+
         case 'validate-story':
           story = interaction.options.getString('story');
           if (!story) {
@@ -431,26 +466,6 @@ Follow the task instructions to check for completeness, clarity, and implementat
 
       // 處理長回應
       await handleLongResponse(interaction, displayMessage, commandName);
-
-      if (commandName === 'create-story') {
-        const summary = extractStorySummary(response);
-        const filename = buildStoryFilename(summary);
-
-        try {
-          const safeSummary = await triggerStoryWorkflow({
-            filename,
-            content: response,
-            summary
-          });
-
-          await interaction.followUp(
-            `🚀 已觸發 GitHub Action 建立 Pull Request。\n• 檔案：\`${filename}\`\n• PR 標題：Add story: ${safeSummary}\n請稍候於 GitHub Actions 查詢執行情況。`
-          );
-        } catch (workflowError) {
-          console.error('[PO Bot] Error triggering story workflow:', workflowError);
-          await interaction.followUp(`⚠️ Story 已產生，但觸發 GitHub Action 失敗：${workflowError.message}`);
-        }
-      }
 
     } catch (error) {
       console.error('[PO Bot] Error:', error);

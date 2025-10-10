@@ -11,6 +11,7 @@
 | `/help` | 顯示幫助資訊 | 不熟悉指令時 | 所有可用命令列表 | 無 | 即時 |
 | `/create-epic` | 建立 Epic（大型功能模組） | Brownfield 專案需要新功能模組 | Epic 定義（YAML 格式） | `description` (必填) | 互動式 |
 | `/create-story` | 建立 User Story | 需要將需求轉換為開發任務 | 完整 Story（含 AC、Tasks、Dev Notes） | `requirements` (必填) | 互動式 |
+| `/create-pr` | Story 轉 Pull Request | Story 撰寫完成後需要送審 | GitHub Pull Request（透過 workflow） | `story` (必填) | 即時 |
 | `/validate-story` | Story 驗證與品質檢查 | Story 建立後、開發前驗證 | 驗證報告 + GO/NO-GO 決策 + 實作準備度評分 | `story` (選填) | 自動分析 |
 | `/correct-course` | 變更管理與專案調整 | 需求變更、方向調整、遇到阻礙 | Sprint Change Proposal（含影響分析、修正提案） | 無 | 漸進式 / YOLO |
 | `/shard-doc` | 文件分割工具 | 大型文件難以維護時 | 分割後的小文件 + index.md | `document` (選填) | 自動 / 手動 |
@@ -27,6 +28,7 @@
 |------|---------|-------------|-------|
 | `/create-epic` | Epic（功能模組） | Brownfield | 中 |
 | `/create-story` | User Story（開發任務） | All | 高 |
+| `/create-pr` | Story 對應的 Pull Request | All | 中 |
 
 ### ✅ 驗證類指令
 
@@ -101,9 +103,40 @@ stories:
 
 **適用專案**: Greenfield 和 Brownfield 都適用
 
+**後續動作**:
+- Story 產出後若需提交 Pull Request，請使用 `/create-pr` 指令並貼上完整 Story 內容。
+
 ---
 
-### 3. `/validate-story` - Story 驗證
+### 3. `/create-pr` - Story 建立 Pull Request
+
+**用途**: 將已確認的 Story 內容送交 GitHub，建立對應 PR 供團隊審查。
+
+**參數**:
+- `story` (必填): Story 的完整 Markdown 內容
+
+**流程**:
+1. 在 Discord thread 中整理好最終 Story 內容（例如 `/create-story` 的輸出）。
+2. 執行 `/create-pr` 並貼上 Story 內容。
+3. PO bot 會觸發 GitHub Action，新增 Story 檔案、推送分支並建立 PR。
+
+**產出**:
+- GitHub Actions 中的 `story-pr` workflow run
+- PR 標題格式：`Add story: <Story 摘要>`
+- 新增 Story 檔案，路徑為 `stories/<日期>-<slug>.md`
+
+**使用範例**:
+```
+/create-pr story: <貼上 Markdown Story 內容>
+```
+
+**注意**:
+- 指令不會呼叫 OpenAI，只處理 GitHub PR 建立流程。
+- 若 workflow 回報 403 或其他錯誤，請檢查環境變數 `PO_BOT_GH_PAT` 是否具備 `repo` 與 `workflow` 權限。
+
+---
+
+### 4. `/validate-story` - Story 驗證
 
 **用途**: 在開發前全面驗證 Story 的完整性和準確性
 
@@ -139,7 +172,7 @@ stories:
 
 ---
 
-### 4. `/execute-checklist` - 專案計劃驗證
+### 5. `/execute-checklist` - 專案計劃驗證
 
 **用途**: 執行 PO Master Checklist，在開發執行前驗證專案計劃
 
@@ -180,7 +213,7 @@ stories:
 
 ---
 
-### 5. `/correct-course` - 變更管理
+### 6. `/correct-course` - 變更管理
 
 **用途**: 結構化的變更管理，處理需求變更或專案調整
 
@@ -222,7 +255,7 @@ stories:
 
 ---
 
-### 6. `/shard-doc` - 文件分割
+### 7. `/shard-doc` - 文件分割
 
 **用途**: 將大型 Markdown 文件分割成多個小文件，方便管理和閱讀
 
@@ -280,7 +313,7 @@ docs/prd/
 
 ---
 
-### 7. `/help` - 顯示幫助
+### 8. `/help` - 顯示幫助
 
 **用途**: 顯示 PO Bot 所有可用命令
 
@@ -291,7 +324,7 @@ docs/prd/
 
 ---
 
-### 8. `/clear` - 清除歷史
+### 9. `/clear` - 清除歷史
 
 **用途**: 清除當前 channel 或 thread 的對話歷史
 
@@ -357,10 +390,14 @@ docs/prd/
    → 驗證 Story 完整性，確保開發就緒
    → 檢查反幻覺、技術細節、任務順序
 
-3. [可選] /execute-checklist
+3. /create-pr story: [貼上 Story 內容]
+   → 觸發 GitHub Action 建立 PR
+   → 團隊可在 GitHub 上審查
+
+4. [可選] /execute-checklist
    → 專案層級檢查（適合大型專案）
 
-4. 開始開發
+5. 開始開發
 ```
 
 ### 情境 B: 既有系統增強（Brownfield）
@@ -374,11 +411,14 @@ docs/prd/
 3. /validate-story
    → 逐一驗證每個 Story
 
-4. /execute-checklist
+4. /create-pr story: [貼上 Story 內容]
+   → 對 Ready 的 Story 逐一建立 PR，進入審查流程
+
+5. /execute-checklist
    → 專案層級檢查（強烈建議！）
    → 特別注意風險管理、既有系統整合
 
-5. 開始開發
+6. 開始開發
 ```
 
 ### 情境 C: 需求變更
@@ -393,7 +433,10 @@ docs/prd/
 3. /validate-story
    → 驗證修改後的 Story
 
-4. 繼續開發
+4. /create-pr story: [貼上 Story 內容]
+   → 為更新後的 Story 建立新的 PR 或更新 PR 内容
+
+5. 繼續開發
 ```
 
 ### 情境 D: 文件過大難以維護
