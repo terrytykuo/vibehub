@@ -4,6 +4,7 @@ const OpenAI = require('openai');
 const https = require('https');
 const { URL } = require('url');
 const { loadAgentWithDependencies } = require('./bmad-loader');
+const { githubWorkflowMcpClient } = require('../mcp/github-workflow-client');
 
 // 載入 PO agent 及其依賴
 const poAgent = loadAgentWithDependencies('po');
@@ -77,28 +78,41 @@ function buildStoryFilename(summary) {
 }
 
 async function triggerStoryWorkflow({ filename, content, summary }) {
-  const token = process.env.PO_BOT_GH_PAT;
-  if (!token) {
-    throw new Error('缺少環境變數 PO_BOT_GH_PAT');
-  }
-
   const owner = process.env.PO_BOT_GH_OWNER || 'terrytykuo';
   const repo = process.env.PO_BOT_GH_REPO || 'vibehub';
   const workflow = process.env.PO_BOT_GH_WORKFLOW || 'story-pr.yml';
+  const ref = process.env.PO_BOT_GH_REF || 'main';
 
   const safeSummary = summary.length > 100 ? `${summary.slice(0, 97)}...` : summary;
-
-  const url = `https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/dispatches`;
-  const payload = {
-    ref: 'main',
-    inputs: {
-      story_filename: filename,
-      story_content_base64: Buffer.from(content, 'utf8').toString('base64'),
-      story_summary: safeSummary
-    }
+  const inputs = {
+    story_filename: filename,
+    story_content_base64: Buffer.from(content, 'utf8').toString('base64'),
+    story_summary: safeSummary
   };
 
-  await postJson(url, token, payload);
+  if (process.env.PO_BOT_MCP_SERVER_URL) {
+    await githubWorkflowMcpClient.dispatchWorkflow({
+      owner,
+      repo,
+      workflow,
+      ref,
+      inputs
+    });
+  } else {
+    const token = process.env.PO_BOT_GH_PAT;
+    if (!token) {
+      throw new Error('缺少環境變數 PO_BOT_GH_PAT');
+    }
+
+    const url = `https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/dispatches`;
+    const payload = {
+      ref,
+      inputs
+    };
+
+    await postJson(url, token, payload);
+  }
+
   return safeSummary;
 }
 

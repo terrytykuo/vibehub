@@ -133,6 +133,12 @@ stories:
 **注意**:
 - 指令不會呼叫 OpenAI，只處理 GitHub PR 建立流程。
 - 若 workflow 回報 403 或其他錯誤，請檢查環境變數 `PO_BOT_GH_PAT` 是否具備 `repo` 與 `workflow` 權限。
+- 若要改用 MCP 方式觸發 GitHub Action，請設定：
+  - `PO_BOT_MCP_SERVER_URL`：GitHub MCP 伺服器的 WebSocket URL。
+  - `PO_BOT_MCP_TOKEN`（選填）：若伺服器需要 Bearer Token，於此提供。
+  - `PO_BOT_MCP_WORKFLOW_TOOL`（選填）：工具名稱，預設為 `github.workflow_dispatch`。
+  - 仍會沿用 `PO_BOT_GH_OWNER`、`PO_BOT_GH_REPO`、`PO_BOT_GH_WORKFLOW` 與 `PO_BOT_GH_REF` 來組合 workflow 參數。
+  - 未設定 `PO_BOT_MCP_SERVER_URL` 時會退回使用 `PO_BOT_GH_PAT` 的直接 API 呼叫。
 
 ---
 
