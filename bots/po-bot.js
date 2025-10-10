@@ -286,7 +286,7 @@ async function start() {
 
       await rest.put(
         Routes.applicationCommands(client.user.id),
-        { body: commands },
+        { body: commands.map(command => command.toJSON()) },
       );
 
       console.log('[PO Bot] Successfully reloaded application (/) commands.');
