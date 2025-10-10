@@ -53,6 +53,17 @@
 
 ---
 
+### 🧠 對話長度與摘要機制
+
+- Bot 會維持同一頻道（含 thread）的完整對話，直到累積約 **10,000 tokens**。
+- 超過門檻時，會自動執行「背景摘要」，濃縮成 6 行以內的重點（前次摘要 + 最新對話），並只保留近期訊息，確保後續請求的上下文不會爆量。
+- 預設每次摘要後僅保留最近 4 則訊息；可透過環境變數調整：
+  - `PO_BOT_SUMMARY_TOKEN_THRESHOLD`：觸發摘要的 token 門檻（預設 10000）。
+  - `PO_BOT_SUMMARY_KEEP_MESSAGES`：摘要後保留的訊息數量（預設 4）。
+- `/clear` 指令會清除該頻道的摘要與歷史，可在需求確認後手動重置上下文，減少成本。
+
+---
+
 ## 詳細指令說明
 
 ### 1. `/create-epic` - 建立 Epic
@@ -137,6 +148,7 @@ stories:
 **注意**:
 - 指令不會呼叫 OpenAI，只處理 GitHub PR 建立流程。
 - 為了讓 GitHub PR 內容更易讀，bot 會自動清理換行與符號（例如以 `-` 取代 `•` 列表符號）。
+- `/create-story` 產生的內容會自動快取 1 小時（可用 `PO_BOT_STORY_CACHE_TTL_MS` 覆寫），方便後續直接 `/create-pr`。
 - 若 workflow 回報 403 或其他錯誤，請檢查環境變數 `PO_BOT_GH_PAT` 是否具備 `repo` 與 `workflow` 權限。
 - 若要改用 MCP 方式觸發 GitHub Action，請設定：
   - `PO_BOT_MCP_SERVER_URL`：GitHub MCP 伺服器的 WebSocket URL。

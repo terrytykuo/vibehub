@@ -13,6 +13,11 @@ const poAgent = loadAgentWithDependencies('po');
 const conversationHistory = new Map();
 const latestStories = new Map();
 const STORY_CACHE_TTL_MS = Number(process.env.PO_BOT_STORY_CACHE_TTL_MS || 60 * 60 * 1000);
+const SUMMARY_TOKEN_THRESHOLD = Number(process.env.PO_BOT_SUMMARY_TOKEN_THRESHOLD || 10000);
+const SUMMARY_KEEP_MESSAGES = Number(process.env.PO_BOT_SUMMARY_KEEP_MESSAGES || 4);
+const openaiClient = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 /**
  * 以 https.request 封裝 GitHub API POST 呼叫
@@ -118,6 +123,76 @@ function getCachedStory(targetId) {
   }
 
   return entry;
+}
+
+function estimateTokenCount(text) {
+  if (!text) return 0;
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (!normalized) return 0;
+  return Math.ceil(normalized.length / 4);
+}
+
+function estimateMessagesTokens(messages = []) {
+  return messages.reduce((total, message) => total + estimateTokenCount(message.content), 0);
+}
+
+function ensureConversationState(targetId) {
+  if (!conversationHistory.has(targetId)) {
+    conversationHistory.set(targetId, { summary: null, messages: [] });
+  }
+  return conversationHistory.get(targetId);
+}
+
+function resetConversationState(targetId) {
+  conversationHistory.set(targetId, { summary: null, messages: [] });
+}
+
+async function maybeSummarizeConversation(targetId, state) {
+  if (SUMMARY_TOKEN_THRESHOLD <= 0 || !state || !Array.isArray(state.messages)) {
+    return;
+  }
+
+  const currentTokens = estimateMessagesTokens(state.messages);
+  if (currentTokens < SUMMARY_TOKEN_THRESHOLD) {
+    return;
+  }
+
+  try {
+    const transcript = state.messages
+      .map(message => `${message.role.toUpperCase()}: ${message.content}`)
+      .join('\n\n---\n\n');
+
+    const summaryPrompt = `你是一位專注於專案管理的助理。請將以下對話濃縮成 6 行以內的摘要，聚焦在：
+- 目前的結論與決策
+- 尚未完成的 TODO 或待確認事項
+- 對 GitHub PR 或 Story 產生的影響
+
+如已有先前摘要，請合併更新，避免重覆。用繁體中文輸出，維持條列或短段落格式。`;
+
+    const userContent = `${state.summary ? `先前摘要：\n${state.summary}\n\n` : ''}最新對話：\n${transcript}`;
+
+    const completion = await openaiClient.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'system', content: 'You summarize conversations for a product team in Traditional Chinese.' },
+        { role: 'user', content: `${summaryPrompt}\n\n${userContent}` }
+      ],
+      max_tokens: 400,
+      temperature: 0.4,
+    });
+
+    const newSummary = completion.choices[0]?.message?.content?.trim();
+    if (newSummary) {
+      state.summary = newSummary;
+      if (SUMMARY_KEEP_MESSAGES > 0) {
+        state.messages = state.messages.slice(-SUMMARY_KEEP_MESSAGES);
+      } else {
+        state.messages = [];
+      }
+    }
+  } catch (error) {
+    console.error('[PO Bot] Error summarizing conversation:', error);
+  }
 }
 
 async function triggerStoryWorkflow({ filename, content, summary }) {
@@ -305,17 +380,13 @@ async function handleLongResponse(interaction, response, questionPreview) {
  * 呼叫 OpenAI API
  */
 async function callOpenAI(systemMessage, userMessage, history = []) {
-  const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-  });
-
   const messages = [
     { role: 'system', content: systemMessage },
     ...history,
     { role: 'user', content: userMessage }
   ];
 
-  const response = await openai.chat.completions.create({
+  const response = await openaiClient.chat.completions.create({
     model: 'gpt-4o',
     messages: messages,
     max_tokens: 4000,
@@ -367,11 +438,8 @@ async function start() {
     try {
       await interaction.deferReply();
 
-      // 準備對話歷史
-      if (!conversationHistory.has(channelId)) {
-        conversationHistory.set(channelId, []);
-      }
-      const history = conversationHistory.get(channelId);
+      const state = ensureConversationState(channelId);
+      const history = state.messages;
 
       let systemMessage, userMessage, dependencies;
       let requirements, epicDesc, story, document;
@@ -504,13 +572,18 @@ Follow the task instructions to check for completeness, clarity, and implementat
           break;
 
         case 'clear':
-          conversationHistory.delete(channelId);
+          resetConversationState(channelId);
+          latestStories.delete(channelId);
           await interaction.editReply('✅ 已清除此 channel 的對話歷史。');
           return;
 
         default:
           await interaction.editReply('❌ Unknown command');
           return;
+      }
+
+      if (state.summary) {
+        systemMessage += `\n\n## Conversation Summary\n${state.summary}\n`;
       }
 
       // 呼叫 OpenAI
@@ -542,6 +615,8 @@ Follow the task instructions to check for completeness, clarity, and implementat
         }
       }
 
+      await maybeSummarizeConversation(channelId, state);
+
     } catch (error) {
       console.error('[PO Bot] Error:', error);
       await interaction.editReply('❌ 處理請求時發生錯誤。');
@@ -561,12 +636,12 @@ Follow the task instructions to check for completeness, clarity, and implementat
 
       const threadId = message.channel.id;
 
-      if (!conversationHistory.has(threadId)) {
-        conversationHistory.set(threadId, []);
+      const state = ensureConversationState(threadId);
+      const history = state.messages;
+      let systemMessage = buildSystemMessage('thread');
+      if (state.summary) {
+        systemMessage += `\n\n## Conversation Summary\n${state.summary}\n`;
       }
-
-      const history = conversationHistory.get(threadId);
-      const systemMessage = buildSystemMessage('thread');
 
       const response = await callOpenAI(systemMessage, message.content, history);
 
@@ -583,6 +658,8 @@ Follow the task instructions to check for completeness, clarity, and implementat
       } else {
         await message.reply(response);
       }
+
+      await maybeSummarizeConversation(threadId, state);
 
     } catch (error) {
       console.error('[PO Bot] Error in thread conversation:', error);
