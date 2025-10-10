@@ -1,6 +1,8 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
 const OpenAI = require('openai');
+const https = require('https');
+const { URL } = require('url');
 const { loadAgentWithDependencies } = require('./bmad-loader');
 
 // 載入 PO agent 及其依賴
@@ -8,6 +10,97 @@ const poAgent = loadAgentWithDependencies('po');
 
 // 儲存對話歷史
 const conversationHistory = new Map();
+
+/**
+ * 以 https.request 封裝 GitHub API POST 呼叫
+ */
+function postJson(url, token, payload) {
+  return new Promise((resolve, reject) => {
+    const endpoint = new URL(url);
+    const options = {
+      hostname: endpoint.hostname,
+      path: `${endpoint.pathname}${endpoint.search}`,
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+        'User-Agent': 'vibehub-po-bot'
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(data);
+        } else {
+          const message = data || res.statusMessage || `HTTP ${res.statusCode}`;
+          reject(new Error(`GitHub API error ${res.statusCode}: ${message}`));
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.write(JSON.stringify(payload));
+    req.end();
+  });
+}
+
+function slugify(text) {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'story';
+}
+
+function extractStorySummary(content) {
+  const storyLine = content.match(/Story:\s*(.+)/i);
+  if (storyLine && storyLine[1]) {
+    return storyLine[1].replace(/\*\*/g, '').trim();
+  }
+
+  const headingMatch = content.match(/^#+\s*(.+)$/m);
+  if (headingMatch && headingMatch[1]) {
+    return headingMatch[1].trim();
+  }
+
+  const firstLine = content.split('\n').find(line => line.trim().length > 0);
+  return firstLine ? firstLine.trim() : 'New story';
+}
+
+function buildStoryFilename(summary) {
+  const datePrefix = new Date().toISOString().split('T')[0];
+  const slug = slugify(summary).slice(0, 50);
+  return `stories/${datePrefix}-${slug}.md`;
+}
+
+async function triggerStoryWorkflow({ filename, content, summary }) {
+  const token = process.env.PO_BOT_GH_PAT;
+  if (!token) {
+    throw new Error('缺少環境變數 PO_BOT_GH_PAT');
+  }
+
+  const owner = process.env.PO_BOT_GH_OWNER || 'terrytykuo';
+  const repo = process.env.PO_BOT_GH_REPO || 'vibehub';
+  const workflow = process.env.PO_BOT_GH_WORKFLOW || 'story-pr.yml';
+
+  const safeSummary = summary.length > 100 ? `${summary.slice(0, 97)}...` : summary;
+
+  const url = `https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/dispatches`;
+  const payload = {
+    ref: 'main',
+    inputs: {
+      story_filename: filename,
+      story_content_base64: Buffer.from(content, 'utf8').toString('base64'),
+      story_summary: safeSummary
+    }
+  };
+
+  await postJson(url, token, payload);
+  return safeSummary;
+}
 
 // 定義 slash commands
 const commands = [
@@ -338,6 +431,26 @@ Follow the task instructions to check for completeness, clarity, and implementat
 
       // 處理長回應
       await handleLongResponse(interaction, displayMessage, commandName);
+
+      if (commandName === 'create-story') {
+        const summary = extractStorySummary(response);
+        const filename = buildStoryFilename(summary);
+
+        try {
+          const safeSummary = await triggerStoryWorkflow({
+            filename,
+            content: response,
+            summary
+          });
+
+          await interaction.followUp(
+            `🚀 已觸發 GitHub Action 建立 Pull Request。\n• 檔案：\`${filename}\`\n• PR 標題：Add story: ${safeSummary}\n請稍候於 GitHub Actions 查詢執行情況。`
+          );
+        } catch (workflowError) {
+          console.error('[PO Bot] Error triggering story workflow:', workflowError);
+          await interaction.followUp(`⚠️ Story 已產生，但觸發 GitHub Action 失敗：${workflowError.message}`);
+        }
+      }
 
     } catch (error) {
       console.error('[PO Bot] Error:', error);
