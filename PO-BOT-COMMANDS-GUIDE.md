@@ -113,11 +113,11 @@ stories:
 **用途**: 將已確認的 Story 內容送交 GitHub，建立對應 PR 供團隊審查。
 
 **參數**:
-- `story` (必填): Story 的完整 Markdown 內容
+- `story` (選填): Story 的完整 Markdown 內容。留空時，會自動採用同一頻道最近一次 `/create-story` 產生的結果。
 
 **流程**:
-1. 在 Discord thread 中整理好最終 Story 內容（例如 `/create-story` 的輸出）。
-2. 執行 `/create-pr` 並貼上 Story 內容。
+1. 先使用 `/create-story` 與團隊討論並確認輸出內容。
+2. 直接執行 `/create-pr`（若需覆蓋或使用其他 Story，才在 `story` 欄位貼上 Markdown）。
 3. PO bot 會觸發 GitHub Action，新增 Story 檔案、推送分支並建立 PR。
 
 **產出**:
@@ -127,11 +127,16 @@ stories:
 
 **使用範例**:
 ```
-/create-pr story: <貼上 Markdown Story 內容>
+/create-pr
+```
+或
+```
+/create-pr story: <自訂 Markdown Story>
 ```
 
 **注意**:
 - 指令不會呼叫 OpenAI，只處理 GitHub PR 建立流程。
+- 為了讓 GitHub PR 內容更易讀，bot 會自動清理換行與符號（例如以 `-` 取代 `•` 列表符號）。
 - 若 workflow 回報 403 或其他錯誤，請檢查環境變數 `PO_BOT_GH_PAT` 是否具備 `repo` 與 `workflow` 權限。
 - 若要改用 MCP 方式觸發 GitHub Action，請設定：
   - `PO_BOT_MCP_SERVER_URL`：GitHub MCP 伺服器的 WebSocket URL。

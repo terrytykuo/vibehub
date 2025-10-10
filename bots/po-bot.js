@@ -11,6 +11,8 @@ const poAgent = loadAgentWithDependencies('po');
 
 // 儲存對話歷史
 const conversationHistory = new Map();
+const latestStories = new Map();
+const STORY_CACHE_TTL_MS = Number(process.env.PO_BOT_STORY_CACHE_TTL_MS || 60 * 60 * 1000);
 
 /**
  * 以 https.request 封裝 GitHub API POST 呼叫
@@ -56,6 +58,19 @@ function slugify(text) {
     .replace(/^-+|-+$/g, '') || 'story';
 }
 
+function normalizeStoryMarkdown(content) {
+  if (!content) return content;
+
+  return (
+    content
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .replace(/\u00A0/g, ' ')
+      .replace(/^[\t ]*[•◦]/gm, '-')
+      .trimEnd() + '\n'
+  );
+}
+
 function extractStorySummary(content) {
   const storyLine = content.match(/Story:\s*(.+)/i);
   if (storyLine && storyLine[1]) {
@@ -75,6 +90,34 @@ function buildStoryFilename(summary) {
   const datePrefix = new Date().toISOString().split('T')[0];
   const slug = slugify(summary).slice(0, 50);
   return `stories/${datePrefix}-${slug}.md`;
+}
+
+function cacheStory(targetId, rawContent) {
+  if (!targetId || !rawContent) return;
+
+  const content = normalizeStoryMarkdown(rawContent);
+  const summary = extractStorySummary(content);
+
+  latestStories.set(targetId, {
+    content,
+    summary,
+    cachedAt: Date.now()
+  });
+}
+
+function getCachedStory(targetId) {
+  if (!targetId) return null;
+  const entry = latestStories.get(targetId);
+  if (!entry) {
+    return null;
+  }
+
+  if (Date.now() - entry.cachedAt > STORY_CACHE_TTL_MS) {
+    latestStories.delete(targetId);
+    return null;
+  }
+
+  return entry;
 }
 
 async function triggerStoryWorkflow({ filename, content, summary }) {
@@ -148,8 +191,8 @@ const commands = [
     .addStringOption(option =>
       option
         .setName('story')
-        .setDescription('Story 完整內容（Markdown）')
-        .setRequired(true)
+        .setDescription('Story 完整內容（Markdown）；留空則使用最新產生的 Story')
+        .setRequired(false)
     ),
 
   new SlashCommandBuilder()
@@ -379,18 +422,29 @@ The story should be implementation-ready for the Dev agent. Format it as a compl
 
         case 'create-pr':
           story = interaction.options.getString('story');
-          if (!story) {
-            await interaction.editReply('❌ 請提供完整的 Story 內容。');
-            return;
+
+          let storyData;
+          if (story) {
+            const normalized = normalizeStoryMarkdown(story);
+            storyData = {
+              content: normalized,
+              summary: extractStorySummary(normalized)
+            };
+            cacheStory(channelId, normalized);
+          } else {
+            storyData = getCachedStory(channelId);
+            if (!storyData) {
+              await interaction.editReply('⚠️ 找不到近期產生的 Story。請先執行 `/create-story`，或在指令中提供 Story Markdown。');
+              return;
+            }
           }
 
           try {
-            const summary = extractStorySummary(story);
-            const filename = buildStoryFilename(summary);
+            const filename = buildStoryFilename(storyData.summary);
             const safeSummary = await triggerStoryWorkflow({
               filename,
-              content: story,
-              summary
+              content: storyData.content,
+              summary: storyData.summary
             });
 
             await interaction.editReply(
@@ -479,7 +533,14 @@ Follow the task instructions to check for completeness, clarity, and implementat
       }
 
       // 處理長回應
-      await handleLongResponse(interaction, displayMessage, commandName);
+      const thread = await handleLongResponse(interaction, displayMessage, commandName);
+
+      if (commandName === 'create-story') {
+        cacheStory(channelId, response);
+        if (thread) {
+          cacheStory(thread.id, response);
+        }
+      }
 
     } catch (error) {
       console.error('[PO Bot] Error:', error);
